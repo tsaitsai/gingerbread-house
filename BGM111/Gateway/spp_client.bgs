@@ -1,0 +1,553 @@
+# Eric Tsai, github.com/tsaitsai
+# BLE-MQTT bridge - BLE client code
+# 2016/10/22, IoTHackday 2016 code, raw
+#
+#Using the SSP example from Silicon Labs, modified to fit my needs.    Retaining copyright notice
+#
+#--------------------------------------------------------------------------------------------------
+# (C) Copyright 2016 Silicon Labs, http://www.silabs.com</b>
+#--------------------------------------------------------------------------------------------------
+# This file is licensed under the Silabs License Agreement. See the file
+# "Silabs_License_Agreement.txt" for details. Before using this software for
+# any purpose, you must agree to the terms of that agreement.
+#--------------------------------------------------------------------------------------------------
+#
+# SPP-over-BLE example for BGM111, client implementation
+#
+# This example is targeted for BGM111 development kit (WSTK6101A). To run this example you need two 
+# development kits, one for the SPP client and another for the SPP slave.
+#
+# You must use SDK version 1.0.2-755 or later. This example will not run corretly with earlier SDK 
+# versions. Check the lastest SDK release from:
+# https://www.silabs.com/products/wireless/bluetooth/Pages/bluetooth-smart-software.aspx
+#
+# --- Changelog: ---
+#
+# 2016-04-10    First release
+#--------------------------------------------------------------------------------------------------
+
+# Selected UART endpoint. 2 = UART1, 5 = UART0
+const uart_ep = 2 
+# LED0 is mapped to pin F6, WSTK
+# Blue LED On $04(0000 0000 0000 0100->pin 2)
+#const led0_bank      = 5
+#const led0_pin_mask  = $40
+const led0_bank      = 0
+const led0_pin_mask  = $0004
+# LED1 is mapped to pin F7, WSTK
+#Green LED On $40(0000 0000 0100 0000->pin 6)
+#const led1_bank      = 5
+#const led1_pin_mask  = $80
+const led1_bank      = 5
+const led1_pin_mask  = $0040
+# CHICKEN
+const verbose = 0
+
+# Variables:
+dim ticker
+
+dim string(6)
+dim strlen 
+
+dim connected
+dim conn_handle
+
+dim res
+dim res2  #chicken
+dim endpoint2
+dim data_string(3)
+dim the_value
+
+dim n
+dim temp
+dim i
+
+dim ad_len
+dim ad_type
+dim ad_match_found
+
+dim tx_fifo(256)
+dim tx_wr # write index
+dim tx_rd # read index
+dim tx_num # number of bytes in buffer
+
+dim max_len
+dim tx_size
+
+dim target_addr(6)
+dim target_addr_type 
+
+#CHICKEN
+#DIM BT_ADDRESS(6)
+
+dim main_state
+
+const SCANNING     = 1 
+const FIND_SERVICE = 2 
+const FIND_CHAR    = 3  
+const ENABLE_NOTIF = 4  
+const DATA_MODE    = 5
+ 
+# want this UUID:  8409f408-63e3-4eea-aaf4-762ddec5319c
+# UUID of SPP service : 4880c12c-fdcb-4077-8920-a450d7f9b907
+
+# door snesor service const SERVICE_UUID() = "\x07\xb9\xf9\xd7\x50\xa4\x20\x89\x77\x40\xcb\xfd\x2c\xc1\x80\x48"
+const SERVICE_UUID() =  "\x1e\x31\xc5\xde\x2d\x76\xf4\xaa\xea\x4e\xe3\x63\x08\xf4\x09\x84"
+dim service_handle 
+
+
+# target characteristic characteristic mydata: 53de9102-a5ac-4df9-9afa-b63cfbe3df66
+# UUID of SPP characteristic: fec26ec4-6d71-4442-9f81-55bc21d658d6 
+const CHAR_UUID() = "\x66\xdf\xe3\xfb\x3c\xb6\xfa\x9a\xf9\x4d\xac\xa5\x02\x91\xde\x53"
+#const CHAR_UUID() = "\xd6\x58\xd6\x21\xbc\x55\x81\x9f\x42\x44\x71\x6d\xc4\x6e\xc2\xfe"
+dim char_handle
+
+dim unrecoverable_error
+
+# print a nibble
+procedure print_nibble(nibble)
+
+    n = nibble
+
+    if n < $a then
+        n = n + $30
+    else
+        n = n + $37
+    end if
+
+    call endpoint_send(uart_ep, 1, n)
+end
+
+# print hex values (range 0..255 -> output 0x00..0xFF)
+procedure print_hex(hex)
+    call print_nibble(hex/16)
+    call print_nibble(hex&$f)
+end
+
+# print 16-bit hex values (range 0..65535 -> output 0x00..0xFFFF)
+procedure print_hex16(hex)
+    
+    temp = (hex >> 8) & $ff
+    call print_nibble(temp/16)
+    call print_nibble(temp&$f)
+    
+    temp = hex & $ff
+    call print_nibble(temp/16)
+    call print_nibble(temp&$f)
+end
+
+# helper function to print integer to UART
+procedure print_int32(int32_value)
+
+    call util_itoa(int32_value)(strlen, string(0:strlen))
+    call endpoint_send(uart_ep, strlen, string(0:strlen))
+
+end 
+
+
+
+# Boot event listener - Generated when the module is powered up or reset
+event system_boot(major, minor, patch, build, bootloader, hw)
+
+	if (verbose) then
+	
+		call endpoint_send(uart_ep, 12, "SPP client\r\n")
+		call endpoint_send(uart_ep, 20, "Boot. Build number: ") 
+		call print_int32(build)
+		call endpoint_send(uart_ep, 2, "\r\n")
+    end if
+    target_addr_type = -1 
+
+    # start discovery, 2=all devices
+    call le_gap_discover(2)
+    main_state = SCANNING
+    
+    # setup timer with ~10ms interval
+    call hardware_set_soft_timer(328,0,0)
+    
+    # start 100ms timer for LED control
+    call hardware_set_soft_timer(3277,1,0)
+    
+end
+
+
+
+
+event le_connection_opened(address, address_type, master, connection, bonding)
+
+	if (verbose) then
+		call endpoint_send(uart_ep, 11, "Connected\r\n")
+	end if
+    connected = 1
+    # make copy of connection handle for later use
+    conn_handle = connection
+
+    # start service discovery (we are only interested in one UUID)
+    call gatt_discover_primary_services_by_uuid(connection,16, SERVICE_UUID(0:16))
+    main_state = FIND_SERVICE
+
+end
+
+# BLE connection disconnected event - Generated when a BLE connection is closed or lost
+event le_connection_closed(reason, connection)
+	if (verbose) then
+	
+		call endpoint_send(uart_ep, 14, "Disconnected\r\n")
+	end if
+    connected = 0
+    conn_handle = -1
+
+    # restart scanning automatically when connection is closed
+    target_addr_type = -1 
+    # reset FIFO 
+    tx_wr = 0
+    tx_rd = 0 
+    tx_num = 0 
+    
+    call le_gap_discover(2)
+    main_state = SCANNING
+
+end
+
+# This event indicates that a GATT service in the remote GATT database was discovered.
+event gatt_service(connection,service,uuid_len, uuid_data)
+
+    if (memcmp(SERVICE_UUID(0), uuid_data(0), 16)) then
+        service_handle = service
+    end if 
+end 
+
+#event triggered after a discover characteristic call
+event gatt_characteristic(connection,characteristic,properties,uuid_len, uuid_data)
+    
+    if (memcmp(CHAR_UUID(0), uuid_data(0), 16)) then
+        char_handle = characteristic
+    end if 
+    
+end
+
+
+#this is where it looks for service ID match
+# procedure for decoding advertising packets. The list of AD types can be found
+# at: https://www.bluetooth.com/specifications/assigned-numbers/Generic-Access-Profile
+procedure decode_adv_data(adv_len, adv_data())
+
+    i = 0
+    ad_match_found = 0 
+	if (verbose) then
+	
+		call endpoint_send(uart_ep, 11, "in decode\r\n")
+	end if
+    while i < (adv_len - 1)
+    
+        ad_len  = adv_data(i:1)
+        ad_type = adv_data(i+1:1)
+        
+        if (ad_type = $08 || ad_type = $09 ) then
+            # type 0x08 = Shortened Local Name
+            # type 0x09 = Complete Local Name
+			if (verbose) then
+			
+				call endpoint_send(uart_ep, 6, "name: ")
+				call endpoint_send(uart_ep, ad_len-1, adv_data(i+2:ad_len-1))
+				call endpoint_send(uart_ep, 2, "\r\n")
+			end if
+        end if
+    
+        if (ad_type = $06 || ad_type = $07) then
+            # type 0x06 = Incomplete List of 128-bit Service Class UUIDs
+            # type 0x07 = Complete List of 128-bit Service Class UUIDs
+            
+            # note: this check assumes that the service we are looking for is first 
+            # in the list. To be fixed so that there is no such limitation...
+            if (memcmp(SERVICE_UUID(0), adv_data(i+2), 16)) then
+				if (verbose) then
+				
+					call endpoint_send(uart_ep, 16, "Found service!\r\n")
+				end if
+                ad_match_found = 1
+            end if 
+            
+        end if 
+        
+        # jump to next AD record
+        i = i + ad_len + 1 
+    end while 
+    
+end 
+
+# everytime advertising received, event triggered
+event le_gap_scan_response(rssi,packet_type,address,address_type,bonding,data_len, data_data)
+
+
+	
+	#BT_ADDRESS(0:1) = address(0:1)
+	if (verbose) then
+		call endpoint_send(uart_ep, 11, "scan resp: ")  
+		call print_hex(address(0:1))
+		call print_hex(address(1:1))
+		call print_hex(address(2:1))
+		call print_hex(address(3:1))
+		call print_hex(address(4:1))
+		call print_hex(address(5:1))
+		call endpoint_send(uart_ep, 2, "\r\n")
+	end if
+    
+    # decode adveritsing data to see if we found what we are looking for.
+    # if match is found, ad_match_found variable is set to positive value
+    call decode_adv_data(data_len, data_data(0:data_len))
+    
+    if ad_match_found > 0 then 
+        memcpy(target_addr(0), address(0), 6)
+        target_addr_type = address_type
+
+        #since device found, stop scanning for more devices
+        call le_gap_end_procedure()
+        
+        #connect to found device
+        call le_gap_open(target_addr(0:6),target_addr_type)(res,conn_handle)
+        
+        # todo: check return value
+        
+    end if 
+end 
+
+
+#event triggered as response to all GATT procedure comletions
+#first trigger is the le_gap_open (connect to device)
+event gatt_procedure_completed(connection,result)
+
+    
+    #use main_state to figure out which gap procedure trigger this procedure complete
+    if main_state = FIND_SERVICE then
+    
+        if service_handle > 0 then
+			if (verbose) then
+			
+				call endpoint_send(uart_ep, 42, "Service found, search for characteristic\r\n")
+			end if
+            call gatt_discover_characteristics(connection,service_handle)
+            main_state = FIND_CHAR  
+        else
+				if (verbose) then
+				
+					call endpoint_send(uart_ep, 21, "Service not found?!\r\n")
+				end if
+            call endpoint_close(conn_handle)
+        end if 
+    
+        return
+    end if 
+    
+    if main_state = FIND_CHAR then
+    
+        if char_handle > 0 then
+			if (verbose) then
+			
+				call endpoint_send(uart_ep, 35, "Char found, turn on notifications\r\n")
+            end if
+            #read characteristic value, event tied to gatt_characteristic_value
+            call gatt_read_characteristic_value(connection,char_handle)(res)
+            #call gatt_set_characteristic_notification(connection,char_handle,gatt_notification)(res)
+            main_state = ENABLE_NOTIF   
+        else
+			if (verbose) then
+			
+				call endpoint_send(uart_ep, 18, "Char not found?!\r\n")
+			end if
+            call endpoint_close(conn_handle)
+        end if 
+    
+        return
+    end if 
+    
+    if main_state = ENABLE_NOTIF then
+		if (verbose) then
+			call endpoint_send(uart_ep, 22, "I am in enable_notif\r\n")
+		end if
+        #read data, then disconnect
+        main_state = DATA_MODE
+        #call gatt_read_characteristic_value(connection,char_handle)(res)
+        
+        
+        
+        
+        # notifications enabled -> transparent data mode
+        #call endpoint_send(uart_ep, 6, "DATA\r\n")
+        #main_state = DATA_MODE
+        #return
+        
+        
+        
+    end if 
+    
+    # unexpected procedure_completed event?
+	if (verbose) then
+		call endpoint_send(uart_ep, 33, "Unexpected procedure completed?\r\n")
+    end if
+end #end gatt_procedure_completed
+
+
+#called after call gatt_read_characteristic_value
+event gatt_characteristic_value(connection,characteristic,att_opcode,offset,value_len, value_data)
+
+    if characteristic = char_handle then
+      if (verbose) then
+      
+        call endpoint_send(uart_ep, 16, "chariteristic = ")
+      
+          #the_value = value_data(0:1)
+          #convert dint to string
+          #string(0:1) = (value_data(0:2) / 100) + 48
+          #string(0:1) = (the_value / 100) + 48
+          #string(1:1) = (data / 10) + (data / -100* 10) + 48
+          #string(2:1) = data + (data / 10* -10) + 48
+          #call endpoint_send(uart_ep, value_len, value_data(0:value_len))
+          #call endpoint_send(uart_ep, 1, string(0:1))
+          
+        call print_int32(value_data(0:1))
+        call endpoint_send(uart_ep, 2, "\r\n")
+      end if
+		
+      #CHICKEN
+      #print out topic payload
+	  #topic is the uuid of module
+      call print_hex(target_addr(0:1))
+      call print_hex(target_addr(1:1))
+      call print_hex(target_addr(2:1))
+      call print_hex(target_addr(3:1))
+      call print_hex(target_addr(4:1))
+      call print_hex(target_addr(5:1))
+      call endpoint_send(uart_ep, 1, " ")
+	  
+	  #payload is the characteristic value
+	  #based on size of expected characteristic, do some filtering
+	  #to do:  handle size of characteristics better
+      call print_int32(value_data(0:3))
+      #call endpoint_send(uart_ep, 2, "\r\n")
+      call endpoint_send(uart_ep, 2, "\n")
+    end if
+    
+    #end connection, start scanning, chicken
+    #call gatt_write_characteristic_value(connection,characteristic,value_len, value_data)(result)
+    call endpoint_close(connection)(res2,endpoint2)
+    
+    
+end 
+
+# This event indicates incoming data from an endpoint.
+event endpoint_data(endpoint,data_len, data_data)
+
+    if endpoint != uart_ep then
+        return
+    end if
+    
+    # copy data to TX FIFO
+    
+    max_len = 256 - tx_wr # max number of bytes that fit in FIFO before wrap around
+    
+    if data_len <= max_len then 
+        memcpy(tx_fifo(tx_wr), data_data(0), data_len)
+        tx_wr = tx_wr + data_len
+    else
+        memcpy(tx_fifo(tx_wr), data_data(0), max_len)
+        temp = data_len - max_len
+        memcpy(tx_fifo(0), data_data(max_len), temp)
+        tx_wr = temp
+    end if
+    
+    tx_num = tx_num + data_len
+
+    if (tx_num > 256) then
+        if (verbose) then
+		
+			call endpoint_send(uart_ep, 11, "OVERFLOW!\r\n")
+		end if
+			
+    end if  
+end 
+
+procedure led_timer()
+
+    # ticker runs from 0..9 
+    if ticker < 9 then
+        ticker = ticker + 1
+    else
+        ticker = 0
+    end if
+    
+    # -- LED blinking: select pattern depending on connection status ---
+    if connected = 0 then 
+        # no connection -> drive LED using a "heart-beat" pattern: ON when ticker = 0 or 2, otherwise OFF
+        if ticker = 0 || ticker = 2  then
+            call hardware_write_gpio(led0_bank, led0_pin_mask, $00) #led on
+        else
+            call hardware_write_gpio(led0_bank, led0_pin_mask, led0_pin_mask) #led off
+        end if
+    
+    else
+        # connected -> blink fast
+        if (ticker & 1) then                
+            call hardware_write_gpio(led0_bank, led0_pin_mask, $00) #led on
+        else
+            call hardware_write_gpio(led0_bank, led0_pin_mask, led0_pin_mask) #led off
+        end if
+        
+    end if 
+    
+    # LED1: turn ON if some unrecoverable error has occurred.
+    if unrecoverable_error > 0 then
+        call hardware_write_gpio(led1_bank, led1_pin_mask, $00) #led on
+    else
+        call hardware_write_gpio(led1_bank, led1_pin_mask, led1_pin_mask) #led off
+    end if
+        
+end
+
+# Software timer event - generated when software timer runs out
+event hardware_soft_timer(handle)
+    
+    if handle = 1 then
+        call led_timer()
+        return
+    end if 
+    
+    # todo: stop timer if tx_num = 0. start timer when tx_num > 0 (in endpoint_data)
+    
+    while tx_num > 0 
+    
+    # send data from TX buffer
+    if tx_num > 20 then
+        tx_size = 20
+    else
+        tx_size = tx_num
+    end if 
+    
+    if (tx_size = 0) then
+         return
+    end if 
+    
+    max_len = 256 - tx_rd # max number of bytes that can be read from FIFO before wrap around
+    
+    # this could be optimized for speed? now optimizing for simplicity..
+    if max_len < tx_size then
+        tx_size = max_len 
+    end if 
+
+    if conn_handle > 0 then 
+        call gatt_write_characteristic_value_without_response(conn_handle, char_handle, tx_size, tx_fifo(tx_rd:tx_size))(res)
+    end if 
+    
+    if res = 0 then 
+        tx_rd = (tx_rd + tx_size) & $ff
+        tx_num = tx_num - tx_size
+    else
+        return
+    end if
+    
+    end while
+end
+    
+
+
+# End of BGScript

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+
+<hardware>
+       
+	<!-- UART configuration -->
+	<!-- Settings: @115200bps, no RTS/CTS and BGAPI serial protocol is enabled -->
+	<!--		<uart index="1" baud="115200" flowcontrol="false" bgapi="false" />	-->
+	<uart index="1" baud="115200" flowcontrol="false" bgapi="false" rx_pin="PD13" tx_pin="PD14"/>
+	
+	
+	<!-- GPIO configuration needed for WSTK UART to work-->
+	<!--	<gpio port="A" pin="5" mode="pushpull" out="1"/> 	-->
+	<!--	<gpio port="A" pin="3" mode="pushpull" out="0"/>	-->
+	
+	<!-- GPIO configuration for LEDs on WSTK board, not used for thunderboard version of gateway-->
+	<!--<gpio port="F" pin="6" mode="pushpull" out="0"/>	-->
+	<!--<gpio port="F" pin="7" mode="pushpull" out="0"/>	-->
+	
+	<!-- GPIO configuration for LED-B (pin PA2), LED-G (pin PF6) as output LED, default off-->
+	<gpio port="A" pin="2" mode="pushpull" out="0" />
+	<gpio port="F" pin="6" mode="pushpull" out="0" />
+
+	<!-- NOTE: you may need to adjust the ctune setting based on what module 
+	     revision you have. Check the UG119 configuration guide for more info -->
+	<!-- <ctune value="0" />   -->
+	
+</hardware>
+

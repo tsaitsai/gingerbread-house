@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+
+<gatt>
+
+	<!-- Generic Access Service -->
+	<!-- https://developer.bluetooth.org/gatt/services/Pages/ServiceViewer.aspx?u=org.bluetooth.service.generic_access.xml -->    
+	<service uuid="1800">
+
+		<description>Generic Access Service</description>
+		
+		<!-- Device name -->
+		<!-- https://developer.bluetooth.org/gatt/characteristics/Pages/CharacteristicViewer.aspx?u=org.bluetooth.characteristic.gap.device_name.xml -->
+		<characteristic uuid="2a00">
+			<properties read="true" const="true" />
+			<value>BGM111 SPP client</value>
+		</characteristic>
+
+		<!-- Appearances -->
+		<!-- https://developer.bluetooth.org/gatt/characteristics/Pages/CharacteristicViewer.aspx?u=org.bluetooth.characteristic.gap.appearance.xml -->
+		<characteristic uuid="2a01">
+			<properties read="true" const="true" />
+			<value type="hex">0000</value>
+		</characteristic>
+
+	</service>
+
+	<!-- Device Information Service -->
+	<!-- https://developer.bluetooth.org/gatt/services/Pages/ServiceViewer.aspx?u=org.bluetooth.service.device_information.xml -->
+	<service uuid="180A">
+
+		<description>Device Information Service</description>
+	
+		<!-- Manufacturer name string -->
+		<!-- https://developer.bluetooth.org/gatt/characteristics/Pages/CharacteristicViewer.aspx?u=org.bluetooth.characteristic.manufacturer_name_string.xml -->
+		<characteristic uuid="2A29">
+			<properties read="true" const="true" />
+			<value>Silicon Labs</value>
+		</characteristic>
+
+		<!-- Model number string string -->
+		<!-- https://developer.bluetooth.org/gatt/characteristics/Pages/CharacteristicViewer.aspx?u=org.bluetooth.characteristic.model_number_string.xml -->
+		<characteristic uuid="2A24">
+			<properties read="true" const="true" />
+			<value>BGM111</value>
+		</characteristic>
+
+	</service>
+	
+	<!-- Our custom accelerometer service is declared here -->	 
+	<!-- UUID values generated with https://www.guidgenerator.com/ --> 
+	<service uuid="4880c12c-fdcb-4077-8920-a450d7f9b907" advertise="true">
+        <description>SPP Service</description>
+        
+		<characteristic uuid="fec26ec4-6d71-4442-9f81-55bc21d658d6" id="xgatt_spp_data">
+            <description>SPP Data</description>
+            <properties write_no_response="true" notify="true" />
+			<value variable_length="true" length="20" type="hex"></value>
+		</characteristic>
+		
+    </service>
+	
+</gatt>
