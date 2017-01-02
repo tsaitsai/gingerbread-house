@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+
+<project device="bgm111">
+	
+	<!-- GATT service database -->
+	<gatt in="gatt.xml" />
+	
+	<!-- Local hardware configuration file -->
+    <hardware in="hardware.xml" />
+
+	<!-- BGScript source code -->
+	<scripting>
+		<script in="bgscript.bgs" />
+    </scripting>
+
+	
+	<!-- Firmware output file -->
+    <image out="output.bin" />
+	
+</project>

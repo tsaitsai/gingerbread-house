@@ -1,0 +1,470 @@
+# Eric Tsai, github.com/tsaitsai
+# BLE-MQTT bridge - BLE server code
+# 2016/10/22, IoTHackday 2016 code, raw
+#
+#Using the SSP example from Silicon Labs, modified to fit my needs.  Retaining copyright notice
+#
+#--------------------------------------------------------------------------------------------------
+# (C) Copyright 2016 Silicon Labs, http://www.silabs.com</b>
+#--------------------------------------------------------------------------------------------------
+# This file is licensed under the Silabs License Agreement. See the file
+# "Silabs_License_Agreement.txt" for details. Before using this software for
+# any purpose, you must agree to the terms of that agreement.
+#--------------------------------------------------------------------------------------------------
+#
+# SPP-over-BLE example for BGM111, client implementation
+#
+# This example is targeted for BGM111 development kit (WSTK6101A). To run this example you need two 
+# development kits, one for the SPP client and another for the SPP slave.
+#
+# You must use SDK version 1.0.2-755 or later. This example will not run corretly with earlier SDK 
+# versions. Check the lastest SDK release from:
+# https://www.silabs.com/products/wireless/bluetooth/Pages/bluetooth-smart-software.aspx
+#
+# --- Changelog: ---
+#
+# 2016-04-10    First release
+#--------------------------------------------------------------------------------------------------
+# Constants:
+const uart_ep = 2
+
+#chicken added
+const PIN_SELECT_MASK = $C0         #0b11000000 = pin 6 and 7, LED0 & 1 on WSTk
+
+#chicken mask for PD13
+#port D = 3
+const reed1_bank      = 3
+#pin 0010 0000 0000 0000
+const reed1_pin_mask  = $2000
+
+#chicken mask for SW1 = PF7 = port 5, pin 7
+#port F = 5
+const sw1_bank = 5
+#pin 0000 0000 1000 0000 = $0080
+const sw1_pin_mask  = $0080
+
+# BTN0 is mapped to pin F6
+const btn0_bank      = 5
+const btn0_pin_mask  = $40
+
+# BTN1 is mapped to pin F7
+const btn1_bank      = 5
+const btn1_pin_mask  = $80
+
+
+# some ASCII codes (used in the debug command interface)
+const ASCII_ESC = 27
+
+# Variables:
+dim ticker
+
+dim string(6)
+dim strlen 
+
+dim connected
+dim conn_handle
+
+dim res
+dim read_result
+
+dim n
+
+dim temp
+
+dim status_bytes(20)
+
+dim button_states(2)    # state for each button 
+const btn_state_pressed = 1
+const btn_state_released = 2 
+const btn_state_undefined = 0 
+
+dim button_timestamps(8) # timestamp when button was pressed (2 * 4 bytes)
+
+dim time_delta
+
+dim num_notifications
+dim notif_countdown
+
+#chicken:  used for keeping count
+dim mycounter
+
+# print a nibble
+procedure print_nibble(nibble)
+
+    n = nibble
+
+    if n < $a then
+        n = n + $30
+    else
+        n = n + $37
+    end if
+
+    call endpoint_send(uart_ep, 1, n)
+end
+
+# print hex values (range 0..255 -> output 0x00..0xFF)
+procedure print_hex(hex)
+    call print_nibble(hex/16)
+    call print_nibble(hex&$f)
+end
+
+# print 16-bit hex values (range 0..65535 -> output 0x00..0xFFFF)
+procedure print_hex16(hex)
+    
+    temp = (hex >> 8) & $ff
+    call print_nibble(temp/16)
+    call print_nibble(temp&$f)
+    
+    temp = hex & $ff
+    call print_nibble(temp/16)
+    call print_nibble(temp&$f)
+end
+
+# print 32-bit hex values (range 0..65535 -> output 0x00..0xFFFF)
+procedure print_hex32(hex)
+    
+    temp = (hex >> 24) & $ff
+    call print_nibble(temp/16)
+    call print_nibble(temp&$f)
+    
+    temp = (hex >> 16) & $ff
+    call print_nibble(temp/16)
+    call print_nibble(temp&$f)
+    
+    temp = (hex >> 8) & $ff
+    call print_nibble(temp/16)
+    call print_nibble(temp&$f)
+    
+    temp = hex & $ff
+    call print_nibble(temp/16)
+    call print_nibble(temp&$f)
+end
+
+# helper function to print integer to UART
+procedure print_int32(int32_value)
+
+    call util_itoa(int32_value)(strlen, string(0:strlen))
+    call endpoint_send(uart_ep, strlen, string(0:strlen))
+
+end 
+
+
+# Boot event listener - Generated when the module is powered up or reset
+event system_boot(major, minor, patch, build, bootloader, hw)
+
+    call endpoint_send(uart_ep, 20, "Boot. Build number: ") 
+    call print_int32(build)
+    call endpoint_send(uart_ep, 2, "\r\n")  
+    mycounter = 1
+
+    num_notifications = 30 
+
+    # set desired Port1 pins to output/low mode
+    #call hardware_io_port_config_direction(1, PIN_SELECT_MASK)
+    #call hardware_io_port_write(0, PIN_SELECT_MASK, PIN_SELECT_MASK)
+
+    
+    # from: https://github.com/FaBoPlatform/BLEDocs/blob/master/bgscript/gettingstarted.md
+    #  call hardware_configure_gpio(port,gpio,mode,output)
+    #port F = 6?  github used port5
+    #GPIO:  PV6 = 6, PF7 = 7 ?
+    # Init GPIO PIN on WSTK==================================
+    ##call hardware_configure_gpio(5,6,hardware_gpio_mode_push_pull,0)
+    ##call hardware_configure_gpio(5,7,hardware_gpio_mode_push_pull,0)
+
+    #call hardware_write_gpio(port,mask,data)
+    # LED On $40(0100 0000->6pin)
+    ##call hardware_write_gpio(5,$40,$40)
+    # LED On $80(1000 0000->7pin)
+    ##call hardware_write_gpio(5,$80,$80)
+
+    # Init GPIO PIN on thunderboard==================================
+    # LED-B = PA2, LED-G=PF6
+    # SW0=PA3, SW1=PF7
+    call hardware_configure_gpio(0,2,hardware_gpio_mode_push_pull,0)
+    call hardware_configure_gpio(5,6,hardware_gpio_mode_push_pull,0)
+
+    #call hardware_write_gpio(port,mask,data)
+    # Blue LED On $04(0000 0000 0000 0100->pin 2), why is 04 OFF?
+    call hardware_write_gpio(0,$0004,$0004)
+    # Green LED On $40(0000 0000 0100 0000->pin 6)
+    call hardware_write_gpio(5,$0040,$0040)
+
+    
+    
+    
+    
+    
+    
+    
+    # Set advertisement interval to 100ms, use all three ADV channels
+    call le_gap_set_adv_parameters(160,400,7)
+    # set advertisement interval to 200-300ms
+    #call gap_set_adv_parameters(320, 480, 7)
+
+    # Start Bluetooth LE advertisements and enable connections
+    # call le_gap_set_mode(2,2)
+    
+    # put module into discoverable/connectable mode
+    #call gap_set_mode(gap_general_discoverable, gap_undirected_connectable)
+    
+    # setup timer with 100ms interval
+    #call hardware_set_soft_timer(3276,0,0)
+
+    
+    #----------------
+
+
+end
+
+
+event le_connection_opened(address, address_type, master, connection, bonding)
+    mycounter = mycounter + 1
+    call endpoint_send(uart_ep, 11, "Connected\r\n")
+    connected = 1
+    # make copy of connection handle for later use
+    conn_handle = connection
+    #call hardware_io_port_write(1, PIN_SELECT_MASK, PIN_SELECT_MASK)
+    #call hardware_write_gpio(port,mask,data)
+    # LED On $40(0100 0000->6pin)
+    ##call hardware_write_gpio(5,$40,$00)
+    # LED On $80(1000 0000->7pin)
+    ##call hardware_write_gpio(5,$80,$80)
+    
+    #----------- thunderboard --------
+    #call hardware_write_gpio(port,mask,data)
+    # Blue LED On $04(0000 0000 0000 0100->pin 2)
+    #call hardware_write_gpio(0,$0004,$0000)
+    # Green LED On $80(0000 0000 0100 0000->pin 7)
+    #call hardware_write_gpio(5,$0040,$0040)
+    
+end
+
+# BLE connection disconnected event - Generated when a BLE connection is closed or lost
+event le_connection_closed(reason, connection)
+
+    call endpoint_send(uart_ep, 14, "Disconnected\r\n")
+    connected = 0
+    conn_handle = -1
+
+    # Start Bluetooth LE advertisements and enable connections
+    # call le_gap_set_mode(2,2)
+    #call hardware_io_port_write(0, PIN_SELECT_MASK, PIN_SELECT_MASK)
+    #call hardware_write_gpio(port,mask,data)
+    # LED On $40(0100 0000->6pin)
+    ##call hardware_write_gpio(5,$40,$40)
+    # LED On $80(1000 0000->7pin)
+    ##call hardware_write_gpio(5,$80,$80)
+    
+    #thunderboard
+    #call hardware_write_gpio(port,mask,data)
+    # Blue LED On $04(0000 0100->pin 2)
+    call hardware_write_gpio(0,$0004,$0004)
+    # Green LED On $80(1000 0000->pin 7)
+    call hardware_write_gpio(5,$0040,$0040)
+    call le_gap_set_mode(0,0)
+end
+
+# This event is triggered whenever the connection parameters are changed and at any time a connection is established.
+event le_connection_parameters(connection,interval,latency,timeout,security_mode)
+
+    call endpoint_send(uart_ep, 35, "connection update, security mode = ")
+    call print_nibble(security_mode)
+    call endpoint_send(uart_ep, 2, "\r\n")
+    
+end 
+
+
+# This event indicates incoming data from an endpoint. Used here to implement simple debug
+# command interface with the UART
+event endpoint_data(endpoint,data_len, data_data)
+
+    if endpoint != uart_ep then
+        return
+    end if
+        
+    if data_data(0:1) = ASCII_ESC then 
+        call endpoint_send(uart_ep, 10, "--ESC---\r\n")
+        # just a placeholder. you can enter any debug functionality here (e.g. disconnect if connection is active)
+        return
+    end if
+    
+end 
+
+
+# capture writes from remote device. 
+
+event gatt_server_attribute_value(connection,attribute,att_opcode,offset,value_len, value_data)
+    # Blue LED On $04(0000 0000 0000 0100->pin 2), ON
+    call hardware_write_gpio(0,$0004,$0000)
+    if attribute = control_byte then
+    
+        num_notifications = value_data(0:1) 
+        
+        call endpoint_send(uart_ep, 25, "Num notifications set to ")
+        call print_int32(num_notifications)
+        call endpoint_send(uart_ep, 2, "\r\n")
+    end if
+end
+
+# Software timer event - generated when software timer runs out
+event hardware_soft_timer(handle)
+
+    if connected > 0 & notif_countdown > 0 then 
+    
+        notif_countdown = notif_countdown - 1 # countdown until zero reached
+        call gatt_server_send_characteristic_notification($ff, status_vector, 1, status_bytes(0:1))
+        
+        status_bytes(0) = status_bytes(0) + 1
+        
+        if notif_countdown = 0 then
+            call endpoint_send(uart_ep, 24, "Last notification sent\r\n")
+        end if 
+    end if  
+end
+
+
+procedure button_press_short(button)
+
+    if button = 0 then 
+        call endpoint_send(uart_ep, 23, "Short press, Button 0\r\n")
+    else 
+        call endpoint_send(uart_ep, 23, "Short press, Button 1\r\n")
+    end if 
+end 
+
+
+procedure button_press_long(button)
+
+    if button = 0 then 
+        call endpoint_send(uart_ep, 22, "Long press, Button 0\r\n")
+        
+        # button 0 long press -> send one notification to client (if connected)
+        if connected > 0 then
+            status_bytes(0) = 1
+            call gatt_server_send_characteristic_notification($ff, status_vector, 1, status_bytes(0:1))
+        end if
+    else 
+        call endpoint_send(uart_ep, 22, "Long press, Button 1\r\n")
+        
+        # button 1 long press -> send 30 (configurable) notifications to client (once per each timer tick i.e. 30x100ms = 3 seconds)
+        if connected > 0 then
+            status_bytes(0) = 0
+            notif_countdown = num_notifications     # this is used as a count-down that is decremented in each timer tick
+            call gatt_server_send_characteristic_notification($ff, status_vector, 1, status_bytes(0:1))
+            # next notifications are sent from the timer handler.... 
+        end if
+    end if 
+end 
+
+
+procedure button_pressed(button, timestamp)
+
+    #call print_hex32(timestamp)
+    #call endpoint_send(uart_ep, 2, "\r\n")
+
+    button_timestamps(button*4:4) = timestamp 
+    button_states(button:1) = btn_state_pressed
+
+    #temp = button_timestamps(button*4:4)
+    #call print_hex32(temp)
+    #call endpoint_send(uart_ep, 2, "\r\n")
+    
+end # procedure button_pressed
+
+procedure button_released(button, timestamp)
+
+    #call print_hex32(button_timestamps(button*4:4))
+    #call endpoint_send(uart_ep, 2, "\r\n")
+    #call print_hex32(timestamp)
+    #call endpoint_send(uart_ep, 2, "\r\n")
+
+
+    time_delta = timestamp - button_timestamps(button*4:4)
+    
+    #call print_int32(time_delta)
+    
+    button_states(button:1) = btn_state_released
+    
+    if time_delta > 3000 then 
+        # long press
+        call button_press_long(button)
+    else
+        # short press
+        call button_press_short(button)
+    end if 
+    
+end # procedure button_released
+
+event hardware_interrupt(interrupts, timestamp)
+
+    #call endpoint_send(uart_ep, 5, "IRQ: ")
+    #call print_hex32(interrupts)
+    #call endpoint_send(uart_ep, 8, ", time: ")
+    #call print_hex32(timestamp)
+    #call endpoint_send(uart_ep, 2, "\r\n")
+    
+    #mycounter = mycounter + 1
+    #call gatt_server_write_attribute_value(mydata,0,1, mycounter)
+    if (interrupts & sw1_pin_mask) = sw1_pin_mask then
+        # read pin state to detect if this was falling or rising edge
+        call hardware_read_gpio(sw1_bank, sw1_pin_mask)(res, read_result)
+    
+        if read_result = sw1_pin_mask then
+            #button is not pressed (@ 3.3V)
+            #call endpoint_send(uart_ep, 15, "BTN0 RELEASED\r\n")
+            # Blue LED On $04(0000 0000 0000 0100->pin 2), OFF
+            call hardware_write_gpio(0,$0004,$0004)
+            call le_gap_set_mode(0,0)
+        else
+            #button is  pressed (grounded)
+            #call endpoint_send(uart_ep, 14, "BTN0 PRESSED\r\n")
+            # Blue LED On $04(0000 0000 0000 0100->pin 2), ON
+            call hardware_write_gpio(0,$0004,$0000)
+            # Start Bluetooth LE advertisements and enable connections
+            call le_gap_set_mode(2,2)
+        end if
+    end if
+
+    #reed1 switches 3.3V, so the pin is pulled down; turn on green LED when see 3.3V
+    if (interrupts & reed1_pin_mask) = reed1_pin_mask then
+        # read pin state to detect if this was falling or rising edge
+        call hardware_read_gpio(reed1_bank, reed1_pin_mask)(res, read_result)
+    
+        #if reed switch is closed
+        if read_result = reed1_pin_mask then
+            #reed switch closed, turn ON LED
+            #call endpoint_send(uart_ep, 15, "BTN0 RELEASED\r\n")
+            # Green LED On $40(0000 0000 0100 0000->pin 6)
+            call hardware_write_gpio(5,$0040,$0000)
+            call gatt_server_write_attribute_value(mydata,0,1, 1)
+            call le_gap_set_mode(2,2)
+        else
+            #reed switch opened, turn ON LED
+            #call endpoint_send(uart_ep, 14, "BTN0 PRESSED\r\n")
+            # Blue LED On $04(0000 0000 0000 0100->pin 2), ON
+            call hardware_write_gpio(0,$0004,$0000)
+            call gatt_server_write_attribute_value(mydata,0,1, 0)
+            call le_gap_set_mode(2,2)
+            
+            #write reed switch value to GATT
+            #call gatt_server_write_attribute_value(mydata,offset,value_len, value_data)
+            
+            
+            #cmd_gatt_read_characteristic_value
+            #event gatt_characteristic_value(connection,characteristic,att_opcode,offset,value_len, value_data)
+            #call gatt_send_characteristic_confirmation(connection)(result)
+            
+            #connection=$ff, all connections.  characteristic is what's in the GATT.xml
+            #call gatt_server_send_characteristic_notification($ff, status_vector, 1, status_bytes(0:1))
+            #call gatt_server_send_characteristic_notification(connection,characteristic,value_len, value_data)
+            #call gatt_server_send_characteristic_notification($ff, mydata, 1, status_bytes(0:1))
+			
+        end if #if reed switch closed, else
+    end if  #end if event was reed switch pin
+
+end
+
+
+
+# End of BGScript

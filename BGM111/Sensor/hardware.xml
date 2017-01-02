@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+
+<hardware>
+       
+	<!-- UART configuration -->
+	<!-- Settings: @115200bps, no RTS/CTS and BGAPI serial protocol is enabled -->
+	<uart index="1" baud="115200" flowcontrol="false" bgapi="false" />
+
+	<!-- GPIO configuration needed for WSTK UART to work-->
+	<gpio port="A" pin="5" mode="pushpull" out="1"/>
+	<gpio port="A" pin="3" mode="pushpull" out="0"/>
+	
+	<!-- GPIO configuration for LED-B (pin PA2), LED-G (pin PF6) as output LED, default off-->
+	<gpio port="A" pin="2" mode="pushpull" out="0" />
+	<gpio port="F" pin="6" mode="pushpull" out="0" />
+  
+	<!-- GPIO configuration for SW1=PF7 port F, pin 7-->
+	<gpio port="F" pin="7" mode="input" out="0" interrupt="both" />
+
+	<gpio port="D" pin="13" mode="INPUTPULLFILTER" out="0" interrupt="both" />
+ 
+ 
+	<!-- if your BGM111 module revision is V1 then uncomment below line. -->
+	<!--ctune value="0" /-->
+	
+</hardware>

@@ -1,0 +1,3 @@
+control_byte 15
+status_vector 18
+mydata 22
