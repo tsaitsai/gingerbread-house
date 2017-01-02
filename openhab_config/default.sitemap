@@ -1,0 +1,14 @@
+sitemap default label="Gingerbread App"
+{
+
+	Frame label="Connected Gingerbread House" 
+	{
+		Switch item=PB_Door_open_CMD
+		Switch item=PB_Door_close_CMD
+		Text item=itm_Front_door
+		Colorpicker	item=itemSnowman
+	}
+
+
+
+}//end sitemap

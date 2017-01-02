@@ -1,0 +1,6 @@
+OpenHAB configuration notes for Gingerbread House
+
+1)  Add the MQTT addon to the addon folder
+2)  Put the .item, .rules, and .sitemap files in their respective folders.
+3)  Add door.map to the ./configuration/transform folder
+4)  Update the MQTT broker to your specific broker IP address in the ./configuration/openhab.cfg

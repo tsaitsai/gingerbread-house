@@ -1,0 +1,22 @@
+
+
+Switch PB_Door_open_CMD "Command Door Open" {mqtt=">[mymosquitto:req_door_open:command:ON:1],>[mymosquitto:req_door_open:command:OFF:1]"}
+Switch PB_Door_close_CMD "Command Door Close" {mqtt=">[mymosquitto:req_door_close:command:ON:1],>[mymosquitto:req_door_close:command:OFF:1]"}
+
+
+//This is the BLE module's MAC address BE710C570B00, the front door sensor
+Number itm_Front_door "Front Door is [MAP(door.map):%s]" {mqtt="<[mymosquitto:BE710C570B00:state:default]"}
+
+
+Color itemSnowman "Lights" {dmx="CHANNEL[1,2,3:1000]"}
+Dimmer dimm_Snowman_R     "LED Red"               <dimmer>        (All)  {mqtt=">[mymosquitto:mq_snow_red:command:*:default]"}
+Dimmer dimm_Snowman_G    "LED Green"             <dimmer>        (All)  {mqtt=">[mymosquitto:mq_snow_green:command:*:default]"}
+Dimmer dimm_Snowman_B     "LED Blue"              <dimmer>        (All)  {mqtt=">[mymosquitto:mq_snow_blue:command:*:default]"}
+
+
+Color itemTree "Tree & House Lights" {dmx="CHANNEL[1,2,3:1000]"}
+Dimmer dimm_Tree_R     "LED Red"               <dimmer>        (All)  {mqtt=">[mymosquitto:mq_tree_red:command:*:default]"}
+Dimmer dimm_Tree_G    "LED Green"             <dimmer>        (All)  {mqtt=">[mymosquitto:mq_tree_green:command:*:default]"}
+Dimmer dimm_Tree_B     "LED Blue"              <dimmer>        (All)  {mqtt=">[mymosquitto:mq_tree_blue:command:*:default]"}
+
+

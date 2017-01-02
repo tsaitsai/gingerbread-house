@@ -1,0 +1,32 @@
+import org.openhab.core.library.types.*
+import org.openhab.core.persistence.*
+import org.openhab.model.script.actions.*
+
+
+var counter = 4
+
+
+
+var HSBType hsbValue
+var String  redValue
+var String  greenValue
+var String  blueValue
+
+rule "Set RGB value"
+when
+        Item itemSnowman changed
+then
+            hsbValue = itemSnowman.state as HSBType
+
+            redValue   = hsbValue.red.intValue.toString
+            greenValue = hsbValue.green.intValue.toString
+            blueValue  = hsbValue.blue.intValue.toString
+
+            sendCommand( dimm_Snowman_R, redValue )
+            sendCommand( dimm_Snowman_G, greenValue )
+            sendCommand( dimm_Snowman_B, blueValue )
+end
+
+
+
+
