@@ -5,6 +5,7 @@
 	<!-- UART configuration -->
 	<!-- Settings: @115200bps, no RTS/CTS and BGAPI serial protocol is enabled -->
 	<!--		<uart index="1" baud="115200" flowcontrol="false" bgapi="false" />	-->
+	<!-- modified uart for Thunderboard React pins   -->
 	<uart index="1" baud="115200" flowcontrol="false" bgapi="false" rx_pin="PD13" tx_pin="PD14"/>
 	
 	
